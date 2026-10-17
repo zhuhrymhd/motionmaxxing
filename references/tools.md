@@ -1,6 +1,6 @@
 # Tools: every script in `scripts/`
 
-`SKILL` = the skill folder. All scripts print `--help`. Zero dependencies unless noted (Node 22+, Chrome, ffmpeg, Python 3.9+). Nothing here calls a paid API except `voice.py` (ElevenLabs) and, only when asked, `imagegen.py` (Codex login, no key). Scratch to delete after tests: frame sequences, drafts, `look/` dirs.
+`SKILL` = the skill folder. All scripts print `--help`. Zero dependencies unless noted (Node 22+, Chrome, ffmpeg, Python 3.9+). Nothing here calls a paid API except `voice.py` (ElevenLabs; `--source native` calls nothing) and, only when asked, `imagegen.py` (Codex login, no key). `score.mjs` synthesizes music and SFX locally. Scratch to delete after tests: frame sequences, drafts, `look/` dirs.
 
 | step | script | one line |
 |---|---|---|
@@ -8,7 +8,7 @@
 | 1 | `brand.mjs`, `fetch_logo.mjs` | capture a site's brand; fetch an official third-party mark |
 | 3 | `precedent.py` | rule-only precedent per beat |
 | 4 | `imagegen.py` | generated SURFACE plates (never text/logo/UI/people) |
-| 5, 8 | `voice.py`, `sync.mjs`, `mix.py` | voice, word timings to frames (5); SFX, music, final mix (8) |
+| 5, 8 | `voice.py`, `sync.mjs`, `mix.py`, `score.mjs` | voice, word timings to frames (5); SFX, music (ElevenLabs or native), final mix (8) |
 | 6-7, 9 | `render.mjs`, `look.py`, `lint.mjs` | render, inspect (G0 G2 G3 + audio), page-chrome lint (G5); final render with sound (9) |
 | 9 | `blind_review.py` | blind A/B page for the user |
 
@@ -40,7 +40,8 @@ Same definitions as SKILL.md and `slop.md` Part 2.
 `python3 "$SKILL/scripts/imagegen.py" plates.json --out film/assets/gen --dry-run` first (guard + exact prompts, spends nothing), then without `--dry-run` (`--jobs 3`, `--only id`, `--force`). One private working dir per plate, md5 collision check, alpha >= 250 snapped to 255, `<id>@WxH.png` cover crop, `ledger.jsonl`. The guard refuses (exit 2) any plate that asks for text, logos or brands, UI/screens/charts, people/faces. Code first, captured asset second, generate last; every plate must perform (parallax, light, occlusion, mask, rack focus); label as illustrative; never replaces product proof. Needs `codex.image_generation: true`; about 1-2 min per plate.
 
 ## voice.py, sync.mjs, mix.py
-- `voice.py` subcommands: `voices`, `vo --script script.txt --out audio/vo.mp3` (writes `vo.words.json`, `vo.lines.json`; `--no-refine` skips the audio refinement), `vo-local` (macOS `say`, estimated timings), `refine`, `split --vo ... --lines ... --out audio/vo` (per-line clips + `lines.index.json`), `sfx --prompt ... --out ...` or `--batch sfx.json`, `sfx-norm`, `music --prompt ... --ms N --out ... [--dry-run]`, `music-check`, `music-fit --duration N [--loop-bars]`. Word and line times are refined against the audio. Reads the ElevenLabs key (exit 3 without one); `--dry-run` (music) shows the request.
+- `voice.py` subcommands: `voices`, `vo --script script.txt --out audio/vo.mp3` (writes `vo.words.json`, `vo.lines.json`; `--no-refine` skips the audio refinement), `vo-local` (macOS `say`, estimated timings), `refine`, `split --vo ... --lines ... --out audio/vo` (per-line clips + `lines.index.json`), `sfx --prompt ... --out ...` or `--batch sfx.json`, `sfx-norm`, `music --prompt ... --ms N --out ... [--dry-run]`, `music-check`, `music-fit --duration N [--loop-bars]`. Word and line times are refined against the audio. Reads the ElevenLabs key (exit 3 without one; exit 4 when the key or plan refuses the feature, HTTP 401/402/403); `--dry-run` (music) shows the request. `music` and `sfx` take `--source elevenlabs|native|auto --score audio/score.json`: `native` renders locally with `score.mjs`, `auto` falls back to native per kind and prints `FALLBACK <kind>: native (<reason>)`.
+- `node score.mjs plan --events <render>.events.json --duration S --hero <frame|label> --mood <mood> --vo-wav vo_only.wav [--roles ...] [--close F]` -> `score.json` (tempo/offset solved on the hero and the closing cut, sections by act, accents, VO regions, SFX on picture events, each with a `why`); `node score.mjs render score.json [--music-out f.wav|none] [--sfx-out f.wav|none] [--stems]` -> film-length `music.native.wav` (-14 LUFS) and `sfx.native.wav`, both from film time 0; `node score.mjs moods`. Node 18+, no deps; ffmpeg for mastering. See `sound-sync.md` 9a.
 - `node sync.mjs audio/vo.words.json --fps 30` -> `beats.json` / `beats.js`: word -> frame table, on-screen onset frames (2 f before the word), clip table for `mix.py`.
 - `python3 mix.py --duration 16 --vo clip@t ... --music m.wav --sfx f@t:gain --duck --out mix.wav` -> -14 LUFS / -1 dBTP stereo 48 kHz. Duck is predictable (`--duck-db 9`).
 

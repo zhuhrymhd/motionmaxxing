@@ -234,12 +234,13 @@ All **practice, not from the corpus** except where the brief's tools set the tar
 
 ## 9. Fallbacks when ElevenLabs is absent
 
-`voice.py` exits with code 3 when no key is found (`ELEVENLABS_API_KEY`, `./.env`, `~/.elevenlabs`, `~/.config/elevenlabs`). Do not stall: pick one fallback, say which in the report, and build the film so a real voice can drop in later.
+`voice.py` exits with code 3 when no key is found (`ELEVENLABS_API_KEY`, `./.env`, `~/.elevenlabs`, `~/.config/elevenlabs`) and with code 4 when the key or plan refuses the feature (HTTP 401/402/403; a free or trial key typically refuses `music` and may still allow `sfx`). Do not stall: pick one fallback, say which in the report, and build the film so a real voice can drop in later. For music and SFX the first fallback is **native audio** (section 9a): `voice.py music|sfx --source auto --score audio/score.json` tries ElevenLabs and falls back per kind, printing `FALLBACK <kind>: native (<reason>)`.
 
 | Fallback | How | Sync accuracy | When |
 |---|---|---|---|
 | **Silent draft** | Render with no audio. Build the beats from an *estimated* words.json (0.36-0.40 s per word at 2.5-2.8 w/s; add 0.2 s after commas and 0.4 s after full stops). Keep beats.json so a real VO and music slot in | picture only | no voice or music wanted, or fast iteration |
 | **Local macOS voice** | `python3 scripts/voice.py vo-local --script script.txt --out audio/vo.aiff` uses `say`, writes a wav and **estimated** word timings (flagged `"est": true`) | word timings +/- 100-200 ms (*practice, not from the corpus*) | want audible pacing without a key |
+| **Native music + SFX** | `scripts/score.mjs` synthesizes a bed and an SFX stem from the film's own score (section 9a); no key, no credits, deterministic | music on the film's own grid; SFX transients on their event frames (measured within 2 ms) | no key, or the plan refuses music/sfx; the user chose native in step 4 |
 | **Text-only rhythm** | Fixed word cadence: 3-4 f (0.10-0.13 s) for kinetic builds (M921, M936), 6-9 f for read-speed pops (M964 8-9 f at 24 fps; M929 5, 8, 8 f), a 15-30 f hold after the last word, one hard cut per 10-20 f on a grid | picture only | no audio at all, or music-led with no music file |
 
 **WHEN** timings are estimated **DO** (a) lead text by 2-3 f, not 0-2, (b) cut on line boundaries, not mid-word, (c) put no frame-exact hit on a word you have not measured, (d) re-run `sync.mjs` when real timings arrive and move only the picture **because** an estimate drifts more over a long line than a short one.
@@ -247,6 +248,41 @@ All **practice, not from the corpus** except where the brief's tools set the tar
 **WHEN** no music is possible **DO** keep the cut grid anyway (section 6) and record the intended tempo in the report so music can be laid later without re-cutting *(practice, not from the corpus)*.
 
 **WHEN** the user supplies their own music or voice **DO** use it, measure its BPM or word times, set g and the frame table from it, and leave generation out.
+
+## 9a. Native score: music and SFX from the film itself (`scripts/score.mjs`)
+
+Ask in step 4, once: **ElevenLabs or native**. Record it in STORYBOARD.md. Native is a clean, synced, licence-free bed; it is plainer than a generated or recorded track, so say so when you offer it, and always listen before delivery. The rule that makes native work: **the score is derived from this film, never picked from a preset.** Nothing in it may be arbitrary; every field carries a `why`.
+
+**1. Plan from the film** (after a draft render, so the events exist):
+```bash
+node scripts/score.mjs plan --events film/draft.mp4.events.json --duration <s> --hero <frame | label text> --mood <mood> \
+     --vo-wav film/audio/vo_only.wav [--roles hook,proof,proof,turn,cta] [--close <frame>] --out film/audio/score.json
+```
+What `plan` decides, and from what:
+
+| Decision | Derived from | Rule |
+|---|---|---|
+| Tempo + bar offset | the hero hit and the closing cut (render events) | inside the mood's BPM range, both land on bar downbeats (else the close on a beat); bar 1 sits at or before 0 s. `why.cut_alignment` lists how far every other cut is from a beat |
+| Sections | the film's cuts (one per act) and the beat table's roles | energy arc: hook 0.3, proofs 0.45 -> 0.57 building, turn/hero 0.72, close 0.3 (ends smaller than it began) |
+| Accents | the hero hit, the closing cut | `drop` with `stop`: one beat of music silence, then the impact on the hero (silence before the hit, section 6a); `stinger` on the closing cut |
+| Melody vs voice | the VO stem's speech regions | no lead note starts inside speech (+-120 ms); a ringing lead sits 6 dB lower under it. `mix.py --duck` still ducks the whole bed |
+| SFX | every picture event (`hit`, `snap`, `press`, `type`, `whip`, `dive`, `focus`, `count`) | one kind per event type (3-5 kinds reused as a system, section 7); the hero hit gets `lock`; transients land on the event frame, swells (whoosh, focus) peak on it |
+
+**2. Review before rendering.** Read score.json against STORYBOARD.md and the brand inventory, and change what does not fit:
+- **Mood = the brand's voice and the PAGE emotion**, not the category's habit: `node scripts/score.mjs moods` lists them. `product` (felt keys, pulse bass, shaker: B2B / analytics / SaaS, confident and unhurried), `calm` (pads, wellness, editorial), `cinematic` (space, big reveals), `tense` (problem or risk acts, minor, little melody), `playful` (plucks, swing, consumer and character films), `punchy` / `hype` (montages, launches with energy). A calm brand never gets `hype`; a joke never gets `cinematic`.
+- **Energy follows importance**: the hero act is the only peak; a proof act that is a breath gets less, not more. Use `breakdown: true` to drop the drums under a quiet beat, `lead: "none"` to keep melody away from a dense read.
+- **Progression and key**: change `progression` / `transpose` when the emotion asks for it (major for "relieved / confident", minor for "tense / before"). One progression per film unless an act turns.
+- **SFX**: delete sounds on events that do not deserve one (the rule in section 7: a few hits, not every move); lower gains under dense speech.
+- Write what you changed into the `why` fields; they go into NOTE.md.
+
+**3. Render, mix, listen.**
+```bash
+node scripts/score.mjs render film/audio/score.json            # -> music.native.wav (-14 LUFS) + sfx.native.wav (authored gains)
+python3 scripts/mix.py --duration <s> --vo ... --music film/audio/music.native.wav --music-gain -17 --duck --sfx film/audio/sfx.native.wav@0:0 --out film/audio/mix.wav
+```
+Both files start at film time 0, so they mix at `@0`. Listen to the mix against the picture; `look.py` checks loudness and silences. Report in NOTE.md: source per kind, tempo and mood with their why, and any FALLBACK line. `--stems` writes drums/bass/chords/lead/fx separately when one layer needs checking.
+
+**WHEN** the film is re-cut **DO** re-run `plan` from the new render's events (the tempo and every SFX move with the picture) and re-apply your review edits **because** a score derived from old frames drifts off the new cuts.
 
 ---
 
