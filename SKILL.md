@@ -74,7 +74,7 @@ Scripts print the numbers; you quote them in `NOTE.md`. Three gates are computed
 ```bash
 bash "$SKILL/scripts/providers.sh"      # Chrome, ffmpeg, HyperFrames, ElevenLabs, Codex image gen, disk
 ```
-Read `taste/verdicts.md` and `taste/edits.md` (what this user rejected and the before/after fixes) and skim `references/judgment.md`. `references/tools.md` lists every script and flag. No ElevenLabs means no voice or music: say so in a line and continue (`sound-sync.md` section 9).
+Read `taste/verdicts.md` and `taste/edits.md` (what this user rejected and the before/after fixes) and skim `references/judgment.md`. `references/tools.md` lists every script and flag. No ElevenLabs (or a plan that refuses a feature, exit 4) is not silence: voice falls back to `vo-local`, and music and SFX can be **native**, synthesized from the film's own score by `scripts/score.mjs` (`sound-sync.md` sections 9 and 9a). Say which in a line and continue.
 
 ### 1. Know the brand (`references/brand.md`)
 ```bash
@@ -90,7 +90,7 @@ In four lines: Problem, Audience, Goal, Emotion; then the one real feature or mo
 Write the first idea, then at least two more of different KINDS (a UI documentary of one task, a held shot, a joke with a character, a typographic essay, a real-output montage, stillness that breaks; a transformation chain is the most over-used). Cover-the-logo and competitor-swap tests; pick one and say why in one line. Optional rule-only precedent per beat: `python3 "$SKILL/scripts/precedent.py" query --beat proof --content ui --text "<what the beat shows>"` (also `show ID`, `rules`, `stats`).
 
 ### 4. Design the world and the time (`director.md`, `world.md`, `layout.md`)
-Write `film/STORYBOARD.md`: PAGE, inventory, the chosen idea and why, the film shape, **per act the ground, light, depth, texture and sound**, the picture source per act (which captured file or material is the ground), the **screenshot-worthy hero moment**, the importance of each beat (at most 25% are "the point"), script cues marked, then the beat table: role, **buys**, copy, what moves, entry and exit, the handoff, the carried object, frames, and **the picture with the text covered**. Check G1, G3 and G4 here, before building. Surfaces and 3D: `scripts/imagegen.py` for a missing surface plate, `runtime/hero3d` for a physical hero (`world.md`).
+Write `film/STORYBOARD.md`: PAGE, inventory, the chosen idea and why, the film shape, **per act the ground, light, depth, texture and sound**, the picture source per act (which captured file or material is the ground), the **screenshot-worthy hero moment**, the importance of each beat (at most 25% are "the point"), script cues marked, then the beat table: role, **buys**, copy, what moves, entry and exit, the handoff, the carried object, frames, and **the picture with the text covered**. Check G1, G3 and G4 here, before building. **Audio source:** when you show the storyboard, ask the user once: music and SFX from **ElevenLabs** (paid key; generated audio) or **native** (local synthesis, no key, no credits, a cleaner but plainer bed), and record the answer in STORYBOARD.md (`Audio: music <elevenlabs|native|auto>, sfx <...>`). No answer means `auto`: ElevenLabs first, native per kind when it is refused. Surfaces and 3D: `scripts/imagegen.py` for a missing surface plate, `runtime/hero3d` for a physical hero (`world.md`).
 
 ### 5. Script and voice (if VO fits; `references/sound-sync.md`)
 ```bash
@@ -119,6 +119,16 @@ python3 "$SKILL/scripts/voice.py" music --prompt "<style, bpm>" --ms <film ms> -
 python3 "$SKILL/scripts/voice.py" music-fit --in film/audio/music.mp3 --out film/audio/music-fit.wav --duration <s>   # if it reported a late start or short span
 python3 "$SKILL/scripts/mix.py" --duration <s> --vo film/audio/vo/line01.wav@<t - lead> --music film/audio/music-fit.wav --events film/events.json --out film/audio/mix.wav
 ```
+**Native or auto audio** (the source chosen in step 4; `sound-sync.md` 9a). The score is derived from this film, never a preset: plan it from the render's events, the hero hit, the brand's mood and the VO's speech, review it, then render.
+```bash
+python3 "$SKILL/scripts/mix.py" --duration <s> --vo film/audio/vo/line01.wav@<t - lead> ... --no-normalize --out film/audio/vo_only.wav   # the VO stem
+node "$SKILL/scripts/score.mjs" plan --events film/draft.mp4.events.json --duration <s> --hero <hero frame> --mood <mood> --vo-wav film/audio/vo_only.wav --out film/audio/score.json
+#   read score.json: tempo why, energy per act against the beat table, accents, sfx; edit, then:
+python3 "$SKILL/scripts/voice.py" music --source auto --score film/audio/score.json --prompt "<style, bpm>" --ms <film ms> --out film/audio/music.mp3
+python3 "$SKILL/scripts/voice.py" sfx --source auto --score film/audio/score.json --batch film/sfx.json --out film/audio/sfx
+#   (--source native skips ElevenLabs; a fallback prints "FALLBACK <kind>: native (<reason>)" -> copy it into NOTE.md)
+python3 "$SKILL/scripts/mix.py" --duration <s> --vo ... --music film/audio/music.native.wav --music-gain -17 --duck --sfx film/audio/sfx/sfx.native.wav@0:0 --out film/audio/mix.wav
+```
 Silence before the hit; pull the music down while the viewer reads; 1-3 hand-placed hero hits. `look.py` audits the mix (LUFS, true peak, silent tail, hits against picture).
 
 ### 9. Final and deliver
@@ -126,7 +136,7 @@ Silence before the hit; pull the music down while the viewer reads; 1-3 hand-pla
 node "$SKILL/scripts/render.mjs" film/index.html film/final.mp4 --audio film/audio/mix.wav [--shutter 180 --subframes 8] [--grain 0.03]
 python3 "$SKILL/scripts/look.py" film/final.mp4 --out film/look-final --expect <planned s> --expect-audio
 ```
-`--shutter` and `--grain` are for smooth-clock films only (`world.md`). Deliver `final.mp4`, the editable `index.html` and **`NOTE.md` (mandatory)**: the one idea and why; each beat and what it buys; what is real (captured UI and copy) and what is illustrative or generated; the G0-G5 numbers quoted from `look.py` and `lint.mjs`; the one-sentence frame descriptions; what you would still improve. Describe what you checked; never certify the film as good. When there are versions to choose between, offer `python3 "$SKILL/scripts/blind_review.py" film/review --round "Versions" a.mp4 b.mp4` (opens `film/review/index.html`); append the user's reaction to `taste/verdicts.md`.
+`--shutter` and `--grain` are for smooth-clock films only (`world.md`). Deliver `final.mp4`, the editable `index.html` and **`NOTE.md` (mandatory)**: the one idea and why; each beat and what it buys; what is real (captured UI and copy) and what is illustrative or generated; the G0-G5 numbers quoted from `look.py` and `lint.mjs`; the audio source per kind (ElevenLabs or native, with any FALLBACK reason) and, for native music, the score's tempo and mood and why; the one-sentence frame descriptions; what you would still improve. Describe what you checked; never certify the film as good. When there are versions to choose between, offer `python3 "$SKILL/scripts/blind_review.py" film/review --round "Versions" a.mp4 b.mp4` (opens `film/review/index.html`); append the user's reaction to `taste/verdicts.md`.
 
 ## Defaults when nothing is specified (starting values, not targets)
 - **Format:** 1920x1080, 30 fps, with sound. Length follows the idea: most launch films run 15-30 s; a single moment 3-7 s.

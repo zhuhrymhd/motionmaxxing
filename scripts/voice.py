@@ -32,8 +32,16 @@ Usage:
   python3 voice.py vo-local --text "..." | --script f.txt --out audio/vo.aiff [--voice Samantha] [--rate 175]
       -> macOS `say` + wav + ESTIMATED word timings (flagged "est": true)
 
+  --source elevenlabs|native|auto (music and sfx; default elevenlabs) + --score audio/score.json
+      native  render locally with scripts/score.mjs from the film's score (no key, no credits): music -> --out (.wav),
+              sfx -> one film-length stem at --out (a .wav file, or <dir>/sfx.native.wav)
+      auto    try ElevenLabs; if there is no key (3) or the key/plan refuses the feature (4: HTTP 401/402/403), fall back to
+              native for THIS kind only (a trial key can refuse music and still make sfx). The fallback is printed as
+              "FALLBACK music: native (reason)": copy that line into NOTE.md.
+      Make the score first: node scripts/score.mjs plan --events out.mp4.events.json --duration S --hero <frame> ...
+
 Key lookup: $ELEVENLABS_API_KEY, ./.env, ~/.elevenlabs, ~/.config/elevenlabs.
-Exit codes: 0 ok, 1 error, 2 bad usage, 3 no ElevenLabs key.
+Exit codes: 0 ok, 1 error, 2 bad usage, 3 no ElevenLabs key, 4 the key or plan does not allow this feature (HTTP 401/402/403).
 """
 from __future__ import annotations
 import argparse, base64, glob, json, math, os, re, shutil, struct, subprocess, sys, tempfile, time, wave
@@ -480,6 +488,10 @@ def sfx_one(key, prompt, seconds, out, influence, force, norm=True, peak=-3.0, k
 
 
 def cmd_sfx(a):
+    return with_source("sfx", a, eleven_sfx)
+
+
+def eleven_sfx(a):
     key = get_key()
     norm = not a.no_normalize
     if a.batch:
@@ -676,7 +688,59 @@ def cmd_music_fit(a):
         print("warn: output length %.4f differs from the requested %.4f" % (got, D), file=sys.stderr)
 
 
+# ---------------------------------------------------------------- native fallback (scripts/score.mjs)
+PLAN_REFUSED = (401, 402, 403)
+
+
+def native_render(kind, a, reason=None):
+    """Render music or the sfx stem locally from the film's score.json. kind: 'music' | 'sfx'."""
+    if not getattr(a, "score", None):
+        die("%snative %s needs --score audio/score.json (make it with: node scripts/score.mjs plan --events <render>.events.json "
+            "--duration S --hero <frame> --mood <mood> --vo-wav <vo stem>)" % ("ElevenLabs unavailable (%s); " % reason if reason else "", kind), 4 if reason else 2)
+    node = os.environ.get("NODE_BIN") or shutil.which("node")
+    if not node:
+        die("native %s needs Node 18+ (set NODE_BIN)" % kind, 2)
+    score = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.mjs")
+    out = a.out
+    if kind == "music":
+        if not out.lower().endswith(".wav"):
+            out = os.path.splitext(out)[0] + ".native.wav"
+        cmd = [node, score, "render", a.score, "--music-out", out, "--sfx-out", "none"]
+    else:
+        if not out.lower().endswith(".wav"):
+            out = os.path.join(out, "sfx.native.wav")
+        cmd = [node, score, "render", a.score, "--music-out", "none", "--sfx-out", out]
+    if reason:
+        print("FALLBACK %s: native (%s) -> %s" % (kind, reason, out), file=sys.stderr)
+    r = subprocess.run(cmd)
+    if r.returncode:
+        die("score.mjs failed (%d)" % r.returncode, r.returncode)
+
+
+def with_source(kind, a, eleven):
+    """Run the ElevenLabs path, the native path, or ElevenLabs with a per-kind native fallback."""
+    src = getattr(a, "source", "elevenlabs")
+    if src == "native":
+        return native_render(kind, a)
+    if src == "elevenlabs":
+        return eleven(a)
+    try:
+        return eleven(a)
+    except SystemExit as e:
+        if e.code == 3:
+            return native_render(kind, a, "no ElevenLabs key")
+        raise
+    except ApiError as e:
+        if e.code in PLAN_REFUSED:
+            return native_render(kind, a, "ElevenLabs HTTP %d: the key or plan does not allow %s" % (e.code, kind))
+        raise
+
+
 def cmd_music(a):
+    return with_source("music", a, eleven_music)
+
+
+def eleven_music(a):
     body = {"model_id": "music_v1"}
     plan_ms = None
     if a.plan:
@@ -853,11 +917,13 @@ def main():
     p.add_argument("--prompt"); p.add_argument("--seconds", type=float); p.add_argument("--out", required=True)
     p.add_argument("--batch"); p.add_argument("--influence", type=float, default=0.5); p.add_argument("--force", action="store_true")
     p.add_argument("--peak", type=float, default=-3.0); p.add_argument("--keep-raw", action="store_true"); p.add_argument("--no-normalize", action="store_true")
+    p.add_argument("--source", choices=["elevenlabs", "native", "auto"], default="elevenlabs"); p.add_argument("--score")
     p = sp.add_parser("sfx-norm")
     p.add_argument("--in", dest="inp", nargs="+", required=True); p.add_argument("--peak", type=float, default=-3.0); p.add_argument("--keep-raw", action="store_true")
     p = sp.add_parser("music")
     p.add_argument("--prompt"); p.add_argument("--ms", type=int, default=20000); p.add_argument("--out", default="audio/music.mp3")
     p.add_argument("--plan"); p.add_argument("--vocals", action="store_true"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--force", action="store_true")
+    p.add_argument("--source", choices=["elevenlabs", "native", "auto"], default="elevenlabs"); p.add_argument("--score")
     p = sp.add_parser("music-check")
     p.add_argument("--in", dest="inp", required=True); p.add_argument("--ms", type=int)
     p = sp.add_parser("music-fit")
@@ -868,7 +934,7 @@ def main():
     try:
         run(a)
     except ApiError as e:
-        die(str(e), 1)
+        die(str(e), 4 if e.code in PLAN_REFUSED else 1)
 
 
 def run(a):

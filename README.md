@@ -172,7 +172,7 @@ flowchart TD
     I --> J["9  Deliver<br/>final.mp4, index.html, NOTE.md"]
 ```
 
-Dashed steps are optional: voice and sound need an ElevenLabs key, and some films are better silent.
+Dashed steps are optional: voice needs an ElevenLabs key (or the local macOS voice), music and sound effects use ElevenLabs or the native score engine, and some films are better silent.
 
 ## Mog check
 
@@ -193,7 +193,7 @@ A gate that fails is fixed, not argued. Scripts print the numbers and the agent 
 
 ## Install
 
-**Requirements:** Node 22+, Python 3, ffmpeg, Google Chrome. Optional: an ElevenLabs key for voice, sound effects and music (`ELEVENLABS_API_KEY`); the Codex CLI with image generation for surface plates.
+**Requirements:** Node 22+, Python 3, ffmpeg, Google Chrome. Optional: an ElevenLabs key for voice, sound effects and music (`ELEVENLABS_API_KEY`); without one (or when a plan refuses music), music and sound effects are synthesized locally by `scripts/score.mjs`. The Codex CLI with image generation for surface plates.
 
 **Claude Code**
 
@@ -244,7 +244,8 @@ Every script prints `--help`. Zero dependencies unless noted. Full flags in [`re
 | `scripts/fetch_logo.mjs` | Fetches an official mark from SVGL, Simple Icons, or the site, and never redraws one |
 | `scripts/precedent.py` | Rule-only precedent per beat from `library/moments.jsonl` (716 rows) |
 | `scripts/imagegen.py` | Generated surface plates, with a guard that refuses text, logos, UI and people |
-| `scripts/voice.py` | ElevenLabs voice-over, sound effects, music, music fitting, and word alignment |
+| `scripts/voice.py` | ElevenLabs voice-over, sound effects, music, music fitting, and word alignment; `--source native\|auto` falls back to native audio |
+| `scripts/score.mjs` | Native music + SFX: plans a score from the film's own events, hero hit, mood and VO, then synthesizes a synced bed and an SFX stem (no key, no samples) |
 | `scripts/sync.mjs` | Word timings to frames, for cutting picture to the voice |
 | `scripts/mix.py` | Voice, music and hits to one -14 LUFS / -1 dBTP mix, with predictable ducking |
 | `scripts/render.mjs` | Deterministic frame-by-frame render through Chrome and ffmpeg; stills, shutter blur, grain |
